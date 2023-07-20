@@ -1,0 +1,7 @@
+.direnv
+.cache
+# flake.lock
+subprojects/*
+!subprojects/packagefiles
+!subprojects/*.wrap
+
