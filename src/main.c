@@ -1,6 +1,7 @@
 #include "idle-inhibit-unstable-v1.h"
 
 #include <fcntl.h>
+#include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +19,14 @@ typedef struct wl_surface wl_surface;
 typedef struct zwp_idle_inhibitor_v1 zwp_idle_inhibitor_v1;
 typedef struct wl_display wl_display;
 
-// Signal Handler/Error 1 = inhibit, 0 = uninhibit, 2 = kill
-uint8_t signal_state = 1;
+typedef enum { INHIBIT, UNINHIBIT, KILL } SignalState;
+static SignalState signal_state = INHIBIT;
+
+typedef enum {
+    NONE,
+    WAYBAR,
+    YAMBAR,
+} Bar;
 
 typedef struct {
     bool* inhibit;
@@ -78,16 +85,16 @@ static bool* create_shared_mem() {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0660);
     if (shm_fd == -1) {
         perror("Failed to create shared memory");
-        signal_state = 2;
+        signal_state = KILL;
     }
     if (ftruncate(shm_fd, sizeof(bool)) == -1) {
         perror("Failed to truncate shared memory");
-        signal_state = 2;
+        signal_state = KILL;
     }
     bool* data = (bool*)mmap(0, sizeof(bool), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (data == MAP_FAILED) {
         perror("Failed to map shared memory");
-        signal_state = 2;
+        signal_state = KILL;
     }
     close(shm_fd);
     *data = true;
@@ -97,7 +104,7 @@ static bool* create_shared_mem() {
 static bool* access_shared_mem() {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_RDWR, 0660);
     if (shm_fd == -1) {
-        perror("Failed to access shared memory");
+        fprintf(stderr, "Failed to attach to the main process, make sure matcha is running\n");
         exit(1);
     }
 
@@ -125,16 +132,16 @@ static void signal_handler(int signum, siginfo_t* info, void* context) {
     switch (signum) {
     case SIGUSR1:
         fprintf(stderr, "SIGUSR1 received, Toggling...\n");
-        if (signal_state == 0) {
-            signal_state = 1;
+        if (signal_state == INHIBIT) {
+            signal_state = UNINHIBIT;
         } else {
-            signal_state = 0;
+            signal_state = INHIBIT;
         }
         break;
     case SIGINT:
     case SIGTERM:
         fprintf(stderr, "SIGINT/SIGTERM received, Killing Matcha...\n");
-        signal_state = 2;
+        signal_state = KILL;
         break;
     default:
         fprintf(stderr, "Unknown signal received\n");
@@ -143,14 +150,66 @@ static void signal_handler(int signum, siginfo_t* info, void* context) {
 }
 
 int main(int argc, char** argv) {
-    // toggle is used for toggling the state of the inhibitor
-    if (argc == 2 && strcmp(argv[1], "--toggle") == 0) {
+    // check if we are in waybar or yambar mode
+    Bar bar = NONE;
+    // use getopt to parse arguments
+    struct option long_options[] = {
+        {"bar", required_argument, 0, 'b'},
+        {"help", no_argument, 0, 'h'},
+        {"toggle", no_argument, 0, 't'},
+        {"off", no_argument, 0, 'o'},
+        {0, 0, 0, 0},
+    };
+    int option_index = 0;
+    int opt;
+    bool off_flag = false;
+    bool toggle_flag = false;
+    while ((opt = getopt_long(argc, argv, "mht:", long_options, &option_index)) != -1) {
+        switch (opt) {
+        case 'b':
+            if (strcmp(optarg, "waybar") == 0) {
+                bar = WAYBAR;
+            } else if (strcmp(optarg, "yambar") == 0) {
+                bar = YAMBAR;
+            } else {
+                fprintf(stderr, "Invalid mode\n");
+                return EXIT_FAILURE;
+            }
+            break;
+        case 'o':
+            off_flag = true;
+            break;
+        case 't':
+            toggle_flag = true;
+            break;
+        case 'h':
+        default:
+            printf("Usage: matcha [OPTION]...\n");
+            printf("Options:\n");
+            printf("  -m, --bar=[BAR]\t Set the bar type to bar (default: None)\n");
+            printf("  -o, --off\t\t Run main instance with inhibitor disabled\n");
+            printf("  -t, --toggle\t\t Toggle the inhibit state\n");
+            printf("  -h, --help\t\t Display this help and exit\n");
+            printf("\nBAR: \n"
+                   "\tYambar - Only works on main instance\n"
+                   "\tWaybar - Only works on toggle instance\n");
+            return EXIT_SUCCESS;
+        }
+    }
+    if (toggle_flag) {
         bool* inhibit = access_shared_mem();
         *inhibit = !*inhibit;
+        if (bar == WAYBAR) {
+            // print to waybar the result
+            // get env variable MATCHA_WAYBAR_TXT
+            char* waybar_txt = getenv("MATCHA_WAYBAR_TXT");
+            if (waybar_txt) {
+                printf("%s\n%s\n\n", waybar_txt, *inhibit ? "Enabled" : "Disabled");
+            } else {
+                printf("\n%s\n\n", *inhibit ? "Enabled" : "Disabled");
+            }
+        }
         return EXIT_SUCCESS;
-    } else if (argc != 1) {
-        fprintf(stderr, "Usage: %s [--toggle]\n", argv[0]);
-        return EXIT_FAILURE;
     }
 
     struct sigaction sig_action;
@@ -198,14 +257,21 @@ int main(int argc, char** argv) {
     }
 
     backend->inhibit = create_shared_mem();
+    if (off_flag) {
+        *backend->inhibit = false;
+    }
     // create a new inhibitor
     backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
         backend->idle_inhibit_manager, backend->surface);
     wl_surface_commit(backend->surface);
     wl_display_roundtrip(backend->display);
 
-    while (signal_state != 2) {
-        if (!*backend->inhibit || signal_state == 0) {
+    while (signal_state != KILL) {
+        if (!*backend->inhibit || signal_state == UNINHIBIT) {
+            if (bar == YAMBAR) {
+                printf("inhibit|bool|false\n\n");
+                fflush(stdout);
+            }
             if (backend->idle_inhibitor) {
                 fprintf(stderr, "Pausing Matcha\n");
                 zwp_idle_inhibitor_v1_destroy(backend->idle_inhibitor);
@@ -214,6 +280,10 @@ int main(int argc, char** argv) {
                 backend->idle_inhibitor = NULL;
             }
         } else {
+            if (bar == YAMBAR) {
+                printf("inhibit|bool|true\n\n");
+                fflush(stdout);
+            }
             if (!backend->idle_inhibitor) {
                 fprintf(stderr, "Starting Matcha\n");
                 backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
@@ -223,7 +293,7 @@ int main(int argc, char** argv) {
             }
         }
         // sleep for 1 second
-        usleep(1000000);
+        usleep(500000);
     }
 
     matcha_destroy(backend);
