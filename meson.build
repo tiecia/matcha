@@ -4,11 +4,7 @@ project('matcha', 'c',
 
 wayland_client = dependency('wayland-client', required: true)
 
-matcha_srcs = files([
-])
-
-
-matcha_inc = include_directories('include')
+matcha_srcs = files('src/main.c')
 
 # Generate Wayland Protocols stuff
 wl_protocols_dep = dependency('wayland-protocols')
@@ -41,7 +37,6 @@ wl_inhibit_dep = declare_dependency(
 
 
 matcha_exe = executable('matcha',
-  matcha_srcs + files('src/main.c'),
-  include_directories: matcha_inc,
+  matcha_srcs,
   dependencies: wl_inhibit_dep
 )
