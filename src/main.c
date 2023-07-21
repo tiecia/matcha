@@ -191,13 +191,13 @@ int main(int argc, char** argv) {
         default:
             printf("Usage: matcha [OPTION]...\n");
             printf("Options:\n");
-            printf("  -m, --bar=[BAR]\t Set the bar type to bar (default: None)\n");
-            printf("  -o, --off\t\t Run main instance with inhibitor disabled\n");
-            printf("  -t, --toggle\t\t Toggle the inhibit state\n");
-            printf("  -h, --help\t\t Display this help and exit\n");
+            printf("  -m, --bar=[BAR]  Set the bar type to bar (default: None)\n");
+            printf("  -o, --off        Run main instance with inhibitor disabled\n");
+            printf("  -t, --toggle     Toggle the inhibit state\n");
+            printf("  -h, --help       Display this help and exit\n");
             printf("\nBAR: \n"
-                   "\tYambar - Only works on main instance\n"
-                   "\tWaybar - Only works on toggle instance\n");
+                   "    Yambar - Only works on main instance\n"
+                   "    Waybar - Only works on toggle instance\n");
             return EXIT_SUCCESS;
         }
     }
@@ -205,13 +205,13 @@ int main(int argc, char** argv) {
         bool* inhibit = access_shared_mem();
         *inhibit = !*inhibit;
         if (bar == WAYBAR) {
-            // print to waybar the result
-            // get env variable MATCHA_WAYBAR_TXT
-            char* waybar_txt = getenv("MATCHA_WAYBAR_TXT");
-            if (waybar_txt) {
-                printf("%s\n%s\n\n", waybar_txt, *inhibit ? "Enabled" : "Disabled");
+            // print to waybar the result (i3 style)
+            char* waybar_on = getenv("MATCHA_WAYBAR_ON");
+            char* waybar_off = getenv("MATCHA_WAYBAR_OFF");
+            if (*inhibit) {
+                printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵", *inhibit ? "Enabled" : "Disabled");
             } else {
-                printf("\n%s\n\n", *inhibit ? "Enabled" : "Disabled");
+                printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤", *inhibit ? "Enabled" : "Disabled");
             }
         }
         return EXIT_SUCCESS;
