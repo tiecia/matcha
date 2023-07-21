@@ -82,19 +82,24 @@ static const struct wl_registry_listener registry_listener = {global_registry_ha
 
 // create shared memory
 static bool* create_shared_mem() {
-    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0660);
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR | O_EXCL, 0660);
     if (shm_fd == -1) {
-        perror("Failed to create shared memory");
+        perror("Failed to initialize Matcha, Other instances might be running\nERR");
         signal_state = KILL;
+        return NULL;
     }
     if (ftruncate(shm_fd, sizeof(bool)) == -1) {
+        close(shm_fd);
         perror("Failed to truncate shared memory");
         signal_state = KILL;
+        return NULL;
     }
     bool* data = (bool*)mmap(0, sizeof(bool), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (data == MAP_FAILED) {
+        close(shm_fd);
         perror("Failed to map shared memory");
         signal_state = KILL;
+        return NULL;
     }
     close(shm_fd);
     *data = true;
@@ -257,6 +262,10 @@ int main(int argc, char** argv) {
     }
 
     backend->inhibit = create_shared_mem();
+    if (backend->inhibit == NULL) {
+        matcha_destroy(backend);
+        return EXIT_SUCCESS;
+    }
     if (off_flag) {
         *backend->inhibit = false;
     }
