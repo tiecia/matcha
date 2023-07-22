@@ -60,6 +60,9 @@ static void matcha_destroy(MatchaBackend* backend) {
         wl_display_flush(backend->display);
         wl_display_disconnect(backend->display);
     }
+    if (backend->inhibit) {
+        munmap(backend->inhibit, sizeof(bool));
+    }
     free(backend);
 }
 
@@ -78,11 +81,19 @@ static void global_registry_handler(void* data, struct wl_registry* registry, ui
     }
 }
 
-static const struct wl_registry_listener registry_listener = {global_registry_handler, NULL};
+// remover, empty
+static void global_registry_remover(void* data, struct wl_registry* registry, uint32_t id) {
+    (void)data;
+    (void)registry;
+    (void)id;
+}
+
+static const struct wl_registry_listener registry_listener = {global_registry_handler,
+                                                              global_registry_remover};
 
 // create shared memory
 static bool* create_shared_mem() {
-    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR | O_EXCL, 0660);
+    int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0660);
     if (shm_fd == -1) {
         perror("Failed to initialize Matcha, Other instances might be running\nERR");
         signal_state = KILL;
@@ -120,14 +131,6 @@ static bool* access_shared_mem() {
     }
     close(shm_fd);
     return data;
-}
-
-// destroy shared memory
-static void destroy_shared_mem() {
-    if (shm_unlink(SHARED_MEM_NAME) == -1) {
-        perror("Failed to unlink shared memory");
-        exit(1);
-    }
 }
 
 // signal handler
@@ -209,11 +212,14 @@ int main(int argc, char** argv) {
             char* waybar_on = getenv("MATCHA_WAYBAR_ON");
             char* waybar_off = getenv("MATCHA_WAYBAR_OFF");
             if (*inhibit) {
-                printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵", *inhibit ? "Enabled" : "Disabled");
+                printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵",
+                       *inhibit ? "Enabled" : "Disabled");
             } else {
-                printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤", *inhibit ? "Enabled" : "Disabled");
+                printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤",
+                       *inhibit ? "Enabled" : "Disabled");
             }
         }
+        munmap(inhibit, sizeof(bool));
         return EXIT_SUCCESS;
     }
 
@@ -230,7 +236,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Failed to set up A Signal handler\n");
     }
 
-    MatchaBackend* backend = (MatchaBackend*)malloc(sizeof(MatchaBackend));
+    MatchaBackend* backend = (MatchaBackend*)calloc(1, sizeof(MatchaBackend));
     if (!backend) {
         fprintf(stderr, "Failed to allocate memory for backend\n");
         return EXIT_FAILURE;
@@ -266,9 +272,8 @@ int main(int argc, char** argv) {
         matcha_destroy(backend);
         return EXIT_SUCCESS;
     }
-    if (off_flag) {
-        *backend->inhibit = false;
-    }
+    *backend->inhibit = !off_flag;
+
     // create a new inhibitor
     backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
         backend->idle_inhibit_manager, backend->surface);
@@ -304,8 +309,6 @@ int main(int argc, char** argv) {
         // sleep for 1 second
         usleep(500000);
     }
-
     matcha_destroy(backend);
-    destroy_shared_mem();
     return EXIT_SUCCESS;
 }
