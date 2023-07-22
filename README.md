@@ -15,7 +15,7 @@ to the common approach of using dbus.
 ```
   Usage: matcha [OPTION]...
   Options:
-    -m, --bar=[BAR]    Set the bar type to bar (default: None)
+    -b, --bar=[BAR]    Set the bar type to bar (default: None)
     -o, --off          Run main instance with inhibitor disabled
     -t, --toggle       Toggle the inhibit state
     -h, --help         Display this help and exit

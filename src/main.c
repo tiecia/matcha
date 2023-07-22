@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
     int opt;
     bool off_flag = false;
     bool toggle_flag = false;
-    while ((opt = getopt_long(argc, argv, "mht:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "bht:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'b':
             if (strcmp(optarg, "waybar") == 0) {
@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
         default:
             printf("Usage: matcha [OPTION]...\n");
             printf("Options:\n");
-            printf("  -m, --bar=[BAR]  Set the bar type to bar (default: None)\n");
+            printf("  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n");
             printf("  -o, --off        Run main instance with inhibitor disabled\n");
             printf("  -t, --toggle     Toggle the inhibit state\n");
             printf("  -h, --help       Display this help and exit\n");
