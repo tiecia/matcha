@@ -1,8 +1,8 @@
 #include "idle-inhibit-unstable-v1.h"
-
 #include <fcntl.h>
 #include <getopt.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,9 +72,7 @@ static void global_registry_handler(void* data, struct wl_registry* registry, ui
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         fprintf(stderr, "Found A Compositor\n");
         backend->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, version);
-    }
-    // inhibit manager
-    else if (strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name) == 0) {
+    } else if (strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name) == 0) {
         fprintf(stderr, "Found An Inhibitor Manager\n");
         backend->idle_inhibit_manager =
             wl_registry_bind(registry, id, &zwp_idle_inhibit_manager_v1_interface, version);
@@ -133,7 +131,6 @@ static bool* access_shared_mem() {
     return data;
 }
 
-// signal handler
 static void signal_handler(int signum, siginfo_t* info, void* context) {
     (void)info;
     (void)context;
@@ -157,22 +154,28 @@ static void signal_handler(int signum, siginfo_t* info, void* context) {
     }
 }
 
-int main(int argc, char** argv) {
-    // check if we are in waybar or yambar mode
+typedef struct {
+    bool off_flag;
+    bool toggle_mode;
+    bool daemon_mode;
+    Bar bar;
+} Args;
+
+Args parse_args(int argc, char** argv) {
+
     Bar bar = NONE;
     // use getopt to parse arguments
     struct option long_options[] = {
-        {"bar", required_argument, 0, 'b'},
-        {"help", no_argument, 0, 'h'},
-        {"toggle", no_argument, 0, 't'},
-        {"off", no_argument, 0, 'o'},
-        {0, 0, 0, 0},
+        {"bar", required_argument, 0, 'b'}, {"daemon", no_argument, 0, 'd'},
+        {"help", no_argument, 0, 'h'},      {"toggle", no_argument, 0, 't'},
+        {"off", no_argument, 0, 'o'},       {0, 0, 0, 0},
     };
     int option_index = 0;
     int opt;
     bool off_flag = false;
-    bool toggle_flag = false;
-    while ((opt = getopt_long(argc, argv, "bht:", long_options, &option_index)) != -1) {
+    bool toggle_mode = false;
+    bool daemon_mode = false;
+    while ((opt = getopt_long(argc, argv, "bdht:", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'b':
             if (strcmp(optarg, "waybar") == 0) {
@@ -181,33 +184,111 @@ int main(int argc, char** argv) {
                 bar = YAMBAR;
             } else {
                 fprintf(stderr, "Invalid mode\n");
-                return EXIT_FAILURE;
+                exit(EXIT_FAILURE);
             }
+            break;
+        case 'd':
+            daemon_mode = true;
             break;
         case 'o':
             off_flag = true;
             break;
         case 't':
-            toggle_flag = true;
+            toggle_mode = true;
             break;
         case 'h':
         default:
-            printf("Usage: matcha [OPTION]...\n");
-            printf("Options:\n");
-            printf("  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n");
-            printf("  -o, --off        Run main instance with inhibitor disabled\n");
-            printf("  -t, --toggle     Toggle the inhibit state\n");
-            printf("  -h, --help       Display this help and exit\n");
-            printf("\nBAR: \n"
-                   "    Yambar - Only works on main instance\n"
-                   "    Waybar - Only works on toggle instance\n");
-            return EXIT_SUCCESS;
+            printf("Usage: matcha [MODE] [OPTION]...\n"
+                   "MODE:\n"
+                   "  -d, --daemon     Main instance (Daemon Mode)\n"
+                   "  -t, --toggle     Toggle instance (Toggle Mode)\n\n"
+                   "Options:\n"
+                   "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n"
+                   "  -o, --off        Start daemon with inhibitor off\n"
+                   "  -h, --help       Display this help and exit\n\n"
+                   "BAR: \n"
+                   "    yambar - Only works on daemon instance\n"
+                   "    waybar - Only works on toggle instance\n");
+
+            exit(EXIT_FAILURE);
         }
     }
-    if (toggle_flag) {
+
+    if (toggle_mode == daemon_mode) {
+        fprintf(stderr, "ERROR: You must specify either --daemon or --toggle\n");
+        exit(EXIT_FAILURE);
+    }
+    if (bar == YAMBAR && toggle_mode) {
+        fprintf(stderr, "ERROR: Yambar only works on daemon side (--daemon)\n");
+        exit(EXIT_FAILURE);
+    }
+    if (bar == WAYBAR && daemon_mode) {
+        fprintf(stderr, "ERROR: Waybar only works on toggle side (--toggle)\n");
+        exit(EXIT_FAILURE);
+    }
+    Args ret = {
+        .off_flag = off_flag,
+        .daemon_mode = daemon_mode,
+        .toggle_mode = toggle_mode,
+        .bar = bar,
+    };
+    return ret;
+}
+
+MatchaBackend* init_backend(bool off_flag) {
+
+    MatchaBackend* backend = (MatchaBackend*)calloc(1, sizeof(MatchaBackend));
+    if (!backend) {
+        fprintf(stderr, "Failed to allocate memory for backend\n");
+        return NULL;
+    }
+    backend->display = wl_display_connect(NULL);
+    if (!backend->display) {
+        fprintf(stderr, "Failed to connect to Wayland server\n");
+        free(backend);
+        return NULL;
+    }
+
+    backend->registry = wl_display_get_registry(backend->display);
+    wl_registry_add_listener(backend->registry, &registry_listener, backend);
+
+    wl_display_roundtrip(backend->display);
+
+    if (!backend->compositor) {
+        fprintf(stderr, "Failed to get wl_compositor\n");
+        matcha_destroy(backend);
+        return NULL;
+    }
+
+    backend->surface = wl_compositor_create_surface(backend->compositor);
+    if (!backend->surface) {
+        fprintf(stderr, "Failed to create Wayland surface\n");
+        matcha_destroy(backend);
+        return NULL;
+    }
+
+    backend->inhibit = create_shared_mem();
+    if (backend->inhibit == NULL) {
+        matcha_destroy(backend);
+        return NULL;
+    }
+    *backend->inhibit = !off_flag;
+
+    backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
+        backend->idle_inhibit_manager, backend->surface);
+    wl_surface_commit(backend->surface);
+    wl_display_roundtrip(backend->display);
+
+    return backend;
+}
+
+int main(int argc, char** argv) {
+    Args args = parse_args(argc, argv);
+
+    if (args.toggle_mode) {
         bool* inhibit = access_shared_mem();
         *inhibit = !*inhibit;
-        if (bar == WAYBAR) {
+        if (args.bar == WAYBAR) {
             // print to waybar the result (i3 style)
             char* waybar_on = getenv("MATCHA_WAYBAR_ON");
             char* waybar_off = getenv("MATCHA_WAYBAR_OFF");
@@ -228,7 +309,7 @@ int main(int argc, char** argv) {
     memset(&sig_action, 0, sizeof(sig_action));
     sig_action.sa_sigaction = signal_handler;
     sig_action.sa_flags = SA_SIGINFO;
-    // Setting up the signal handler for SIGUSR1
+    // Setting up the signal handler for SIGUSR1, SIGINT, SIGTERM
     int sig_ret = sigaction(SIGUSR1, &sig_action, NULL);
     sig_ret |= sigaction(SIGINT, &sig_action, NULL);
     sig_ret |= sigaction(SIGTERM, &sig_action, NULL);
@@ -236,53 +317,13 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Failed to set up A Signal handler\n");
     }
 
-    MatchaBackend* backend = (MatchaBackend*)calloc(1, sizeof(MatchaBackend));
-    if (!backend) {
-        fprintf(stderr, "Failed to allocate memory for backend\n");
+    MatchaBackend* backend = init_backend(args.off_flag);
+    if (backend == NULL)
         return EXIT_FAILURE;
-    }
-    backend->display = wl_display_connect(NULL);
-    if (!backend->display) {
-        fprintf(stderr, "Failed to connect to Wayland server\n");
-        free(backend);
-        return EXIT_FAILURE;
-    }
-
-    backend->registry = wl_display_get_registry(backend->display);
-    wl_registry_add_listener(backend->registry, &registry_listener, backend);
-
-    // Roundtrip to ensure we processed all events and got the compositor.
-    wl_display_roundtrip(backend->display);
-
-    if (!backend->compositor) {
-        fprintf(stderr, "Failed to get wl_compositor\n");
-        matcha_destroy(backend);
-        return EXIT_FAILURE;
-    }
-
-    backend->surface = wl_compositor_create_surface(backend->compositor);
-    if (!backend->surface) {
-        fprintf(stderr, "Failed to create Wayland surface\n");
-        matcha_destroy(backend);
-        return EXIT_FAILURE;
-    }
-
-    backend->inhibit = create_shared_mem();
-    if (backend->inhibit == NULL) {
-        matcha_destroy(backend);
-        return EXIT_SUCCESS;
-    }
-    *backend->inhibit = !off_flag;
-
-    // create a new inhibitor
-    backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
-        backend->idle_inhibit_manager, backend->surface);
-    wl_surface_commit(backend->surface);
-    wl_display_roundtrip(backend->display);
 
     while (signal_state != KILL) {
         if (!*backend->inhibit || signal_state == UNINHIBIT) {
-            if (bar == YAMBAR) {
+            if (args.bar == YAMBAR) {
                 printf("inhibit|bool|false\n\n");
                 fflush(stdout);
             }
@@ -294,7 +335,7 @@ int main(int argc, char** argv) {
                 backend->idle_inhibitor = NULL;
             }
         } else {
-            if (bar == YAMBAR) {
+            if (args.bar == YAMBAR) {
                 printf("inhibit|bool|true\n\n");
                 fflush(stdout);
             }
@@ -306,8 +347,7 @@ int main(int argc, char** argv) {
                 wl_display_roundtrip(backend->display);
             }
         }
-        // sleep for 1 second
-        usleep(500000);
+        usleep(100000);
     }
     matcha_destroy(backend);
     return EXIT_SUCCESS;
