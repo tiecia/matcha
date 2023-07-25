@@ -13,19 +13,22 @@ to the common approach of using dbus.
 ## Usage
 
 ```
-  Usage: matcha [OPTION]...
-  Options:
-    -b, --bar=[BAR]    Set the bar type to bar (default: None)
-    -o, --off          Run main instance with inhibitor disabled
-    -t, --toggle       Toggle the inhibit state
-    -h, --help         Display this help and exit
+  Usage: matcha [MODE] [OPTION]...
+  MODE:
+    -d, --daemon     Main instance (Daemon Mode)
+    -t, --toggle     Toggle instance (Toggle Mode)
 
-  BAR:
-    Yambar - Only works on main instance
-    Waybar - Only works on toggle instance
+  Options:
+    -b, --bar=[BAR]  Set the bar type to bar (default: None)
+    -o, --off        Start daemon with inhibitor off
+    -h, --help       Display this help and exit
+
+  BAR: 
+      yambar - Only works on daemon instance
+      waybar - Only works on toggle instance
 ```
 
-Matcha consists of two parts, a main instance that runs if `--toggle` flag is not set, and a toggle instance.
+Matcha consists of two parts, a main instance (via `--daemon`) and a toggle instance (via `--toggle`).
 
 The main instance simply initialize and starts the inhibitor while waiting possible toggle.
 The toggle instance, toggles the state and exits (with a possible message).
@@ -41,7 +44,7 @@ bar:
   right:
     - script:
         path: matcha # Path to matcha executable
-        args: ['--bar=yambar', '--off']
+        args: ['-d', '--bar=yambar', '--off']
         content:
             - map:
                 on-click:
@@ -67,7 +70,7 @@ modify the `MATCHA_WAYBAR_OFF`,`MATCHA_WAYBAR_ON` environment variables with the
 
 - wayland-client
 - meson
-- a C23 compiler
+- a C17 compiler
 
 ```bash
   $ meson setup build --buildtype=release -Dprefix=$INSTALL_LOCATION

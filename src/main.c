@@ -90,7 +90,7 @@ static const struct wl_registry_listener registry_listener = {global_registry_ha
                                                               global_registry_remover};
 
 // create shared memory
-static bool* create_shared_mem() {
+static bool* create_shared_mem(void) {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0660);
     if (shm_fd == -1) {
         perror("Failed to initialize Matcha, Other instances might be running\nERR");
@@ -115,7 +115,7 @@ static bool* create_shared_mem() {
     return data;
 }
 
-static bool* access_shared_mem() {
+static bool* access_shared_mem(void) {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_RDWR, 0660);
     if (shm_fd == -1) {
         fprintf(stderr, "Failed to attach to the main process, make sure matcha is running\n");
