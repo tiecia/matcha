@@ -1,6 +1,7 @@
 #include "idle-inhibit-unstable-v1.h"
 #include <fcntl.h>
 #include <getopt.h>
+#include <semaphore.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,7 +30,12 @@ typedef enum {
 } Bar;
 
 typedef struct {
-    bool* inhibit;
+    bool inhibit;
+    sem_t sem;
+} SharedMem;
+
+typedef struct {
+    SharedMem* shared_mem;
     wl_registry* registry;
     wl_display* display;
     wl_compositor* compositor;
@@ -60,50 +66,52 @@ static void matcha_destroy(MatchaBackend* backend) {
         wl_display_flush(backend->display);
         wl_display_disconnect(backend->display);
     }
-    if (backend->inhibit) {
-        munmap(backend->inhibit, sizeof(bool));
+    if (backend->shared_mem) {
+        sem_destroy(&backend->shared_mem->sem);
+        munmap(backend->shared_mem, sizeof(bool));
     }
     free(backend);
 }
 
-static void global_registry_handler(void* data, struct wl_registry* registry, uint32_t id,
+static void global_registry_handler(void* data, struct wl_registry* registry, uint32_t name,
                                     const char* interface, uint32_t version) {
     MatchaBackend* backend = (MatchaBackend*)data;
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
         fprintf(stderr, "Found A Compositor\n");
-        backend->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, version);
+        backend->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, version);
     } else if (strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name) == 0) {
         fprintf(stderr, "Found An Inhibitor Manager\n");
         backend->idle_inhibit_manager =
-            wl_registry_bind(registry, id, &zwp_idle_inhibit_manager_v1_interface, version);
+            wl_registry_bind(registry, name, &zwp_idle_inhibit_manager_v1_interface, version);
     }
 }
 
 // remover, empty
-static void global_registry_remover(void* data, struct wl_registry* registry, uint32_t id) {
+static void global_registry_remover(void* data, struct wl_registry* registry, uint32_t name) {
     (void)data;
     (void)registry;
-    (void)id;
+    (void)name;
 }
 
 static const struct wl_registry_listener registry_listener = {global_registry_handler,
                                                               global_registry_remover};
 
 // create shared memory
-static bool* create_shared_mem(void) {
+static SharedMem* create_shared_mem(void) {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0660);
     if (shm_fd == -1) {
         perror("Failed to initialize Matcha, Other instances might be running\nERR");
         signal_state = KILL;
         return NULL;
     }
-    if (ftruncate(shm_fd, sizeof(bool)) == -1) {
+    if (ftruncate(shm_fd, sizeof(SharedMem)) == -1) {
         close(shm_fd);
         perror("Failed to truncate shared memory");
         signal_state = KILL;
         return NULL;
     }
-    bool* data = (bool*)mmap(0, sizeof(bool), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    SharedMem* data =
+        (SharedMem*)mmap(0, sizeof(SharedMem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (data == MAP_FAILED) {
         close(shm_fd);
         perror("Failed to map shared memory");
@@ -111,18 +119,20 @@ static bool* create_shared_mem(void) {
         return NULL;
     }
     close(shm_fd);
-    *data = true;
+    sem_init(&data->sem, 1, 1);
+    data->inhibit = true;
     return data;
 }
 
-static bool* access_shared_mem(void) {
+static SharedMem* access_shared_mem(void) {
     int shm_fd = shm_open(SHARED_MEM_NAME, O_RDWR, 0660);
     if (shm_fd == -1) {
         fprintf(stderr, "Failed to attach to the main process, make sure matcha is running\n");
         exit(1);
     }
 
-    bool* data = (bool*)mmap(0, sizeof(bool), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    SharedMem* data =
+        (SharedMem*)mmap(0, sizeof(SharedMem), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (data == MAP_FAILED) {
         perror("Failed to map shared memory");
         exit(1);
@@ -267,12 +277,12 @@ MatchaBackend* init_backend(bool off_flag) {
         return NULL;
     }
 
-    backend->inhibit = create_shared_mem();
-    if (backend->inhibit == NULL) {
+    backend->shared_mem = create_shared_mem();
+    if (backend->shared_mem == NULL) {
         matcha_destroy(backend);
         return NULL;
     }
-    *backend->inhibit = !off_flag;
+    backend->shared_mem->inhibit = !off_flag;
 
     backend->idle_inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
         backend->idle_inhibit_manager, backend->surface);
@@ -286,21 +296,22 @@ int main(int argc, char** argv) {
     Args args = parse_args(argc, argv);
 
     if (args.toggle_mode) {
-        bool* inhibit = access_shared_mem();
-        *inhibit = !*inhibit;
+        SharedMem* shm = access_shared_mem();
+        shm->inhibit = !shm->inhibit;
         if (args.bar == WAYBAR) {
             // print to waybar the result (i3 style)
             char* waybar_on = getenv("MATCHA_WAYBAR_ON");
             char* waybar_off = getenv("MATCHA_WAYBAR_OFF");
-            if (*inhibit) {
+            if (shm->inhibit) {
                 printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵",
-                       *inhibit ? "Enabled" : "Disabled");
+                       shm->inhibit ? "Enabled" : "Disabled");
             } else {
                 printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤",
-                       *inhibit ? "Enabled" : "Disabled");
+                       shm->inhibit ? "Enabled" : "Disabled");
             }
         }
-        munmap(inhibit, sizeof(bool));
+        sem_post(&shm->sem);
+        munmap(shm, sizeof(SharedMem));
         return EXIT_SUCCESS;
     }
 
@@ -320,9 +331,9 @@ int main(int argc, char** argv) {
     MatchaBackend* backend = init_backend(args.off_flag);
     if (backend == NULL)
         return EXIT_FAILURE;
-
     while (signal_state != KILL) {
-        if (!*backend->inhibit || signal_state == UNINHIBIT) {
+        sem_wait(&backend->shared_mem->sem);
+        if (!backend->shared_mem->inhibit || signal_state == UNINHIBIT) {
             if (args.bar == YAMBAR) {
                 printf("inhibit|bool|false\n\n");
                 fflush(stdout);
@@ -347,7 +358,6 @@ int main(int argc, char** argv) {
                 wl_display_roundtrip(backend->display);
             }
         }
-        usleep(100000);
     }
     matcha_destroy(backend);
     return EXIT_SUCCESS;
