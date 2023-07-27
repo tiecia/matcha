@@ -83,7 +83,7 @@ static void matcha_destroy(MatchaBackend* backend) {
     }
     if (backend->shared_mem) {
         sem_destroy(&backend->shared_mem->sem);
-        munmap(backend->shared_mem, sizeof(bool));
+        munmap(backend->shared_mem, sizeof(SharedMem));
     }
     free(backend);
 }
