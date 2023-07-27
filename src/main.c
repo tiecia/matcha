@@ -11,6 +11,21 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+
+
+#define HELP \
+    "Usage: matcha [MODE] [OPTION]...\n" \
+    "MODE:\n" \
+    "  -d, --daemon     Main instance (Daemon Mode)\n" \
+    "  -t, --toggle     Toggle instance (Toggle Mode)\n\n" \
+    "Options:\n" \
+    "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n" \
+    "  -o, --off        Start daemon with inhibitor off\n" \
+    "  -h, --help       Display this help and exit\n\n" \
+    "BAR: \n" \
+    "    yambar - Only works on daemon instance\n" \
+    "    waybar - Only works on toggle instance\n" \
+
 #define SHARED_MEM_NAME "/matcha-idle-inhibit"
 
 typedef struct wl_registry wl_registry;
@@ -208,24 +223,14 @@ Args parse_args(int argc, char** argv) {
             break;
         case 'h':
         default:
-            printf("Usage: matcha [MODE] [OPTION]...\n"
-                   "MODE:\n"
-                   "  -d, --daemon     Main instance (Daemon Mode)\n"
-                   "  -t, --toggle     Toggle instance (Toggle Mode)\n\n"
-                   "Options:\n"
-                   "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n"
-                   "  -o, --off        Start daemon with inhibitor off\n"
-                   "  -h, --help       Display this help and exit\n\n"
-                   "BAR: \n"
-                   "    yambar - Only works on daemon instance\n"
-                   "    waybar - Only works on toggle instance\n");
+            printf(HELP);
 
             exit(EXIT_FAILURE);
         }
     }
 
     if (toggle_mode == daemon_mode) {
-        fprintf(stderr, "ERROR: You must specify either --daemon or --toggle\n");
+        fprintf(stderr, "ERROR: You must specify either --daemon or --toggle\n\n%s", HELP);
         exit(EXIT_FAILURE);
     }
     if (bar == YAMBAR && toggle_mode) {
@@ -303,11 +308,9 @@ int main(int argc, char** argv) {
             char* waybar_on = getenv("MATCHA_WAYBAR_ON");
             char* waybar_off = getenv("MATCHA_WAYBAR_OFF");
             if (shm->inhibit) {
-                printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵",
-                       shm->inhibit ? "Enabled" : "Disabled");
+                printf("%s\n%s\n\n", waybar_on ? waybar_on : "🍵", "Enabled");
             } else {
-                printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤",
-                       shm->inhibit ? "Enabled" : "Disabled");
+                printf("%s\n%s\n\n", waybar_off ? waybar_off : "💤", "Disabled");
             }
         }
         sem_post(&shm->sem);
