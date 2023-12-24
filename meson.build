@@ -1,5 +1,5 @@
 project('matcha', 'c',
-  version : '1.1.1',
+  version : '1.1.2',
   default_options : ['warning_level=3','werror=true', 'c_std=c11'])
 
 wayland_client = dependency('wayland-client', required: true)
