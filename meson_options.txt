@@ -1,0 +1,1 @@
+option('static_analyzer', type: 'boolean', value: false, description: 'enable GCC static analyzer')

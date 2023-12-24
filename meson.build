@@ -1,6 +1,6 @@
 project('matcha', 'c',
   version : '1.1.1',
-  default_options : ['warning_level=3','werror=true', 'c_std=gnu17'])
+  default_options : ['warning_level=3','werror=true', 'c_std=c11'])
 
 wayland_client = dependency('wayland-client', required: true)
 
@@ -35,6 +35,14 @@ wl_inhibit_dep = declare_dependency(
   dependencies: [wayland_client],
 )
 
+cc = meson.get_compiler('c')
+if get_option('static_analyzer')
+    if cc.get_id() == 'gcc' and cc.version().version_compare('>=10.1.0')
+        add_project_arguments('-fanalyzer', language: 'c')
+    else
+       error('Compiler does not support static analysis')
+    endif
+endif
 
 matcha_exe = executable('matcha',
   matcha_srcs,

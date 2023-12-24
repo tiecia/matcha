@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 500
 #include "idle-inhibit-unstable-v1.h"
 #include <fcntl.h>
 #include <getopt.h>
@@ -11,20 +12,18 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
-
-
-#define HELP \
-    "Usage: matcha [MODE] [OPTION]...\n" \
-    "MODE:\n" \
-    "  -d, --daemon     Main instance (Daemon Mode)\n" \
-    "  -t, --toggle     Toggle instance (Toggle Mode)\n\n" \
-    "Options:\n" \
-    "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n" \
-    "  -o, --off        Start daemon with inhibitor off\n" \
-    "  -h, --help       Display this help and exit\n\n" \
-    "BAR: \n" \
-    "    yambar - Only works on daemon instance\n" \
-    "    waybar - Only works on toggle instance\n" \
+#define HELP                                                                                       \
+    "Usage: matcha [MODE] [OPTION]...\n"                                                           \
+    "MODE:\n"                                                                                      \
+    "  -d, --daemon     Main instance (Daemon Mode)\n"                                             \
+    "  -t, --toggle     Toggle instance (Toggle Mode)\n\n"                                         \
+    "Options:\n"                                                                                   \
+    "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n"                                 \
+    "  -o, --off        Start daemon with inhibitor off\n"                                         \
+    "  -h, --help       Display this help and exit\n\n"                                            \
+    "BAR: \n"                                                                                      \
+    "    yambar - Only works on daemon instance\n"                                                 \
+    "    waybar - Only works on toggle instance\n"
 
 #define SHARED_MEM_NAME "/matcha-idle-inhibit"
 
@@ -200,7 +199,7 @@ Args parse_args(int argc, char** argv) {
     bool off_flag = false;
     bool toggle_mode = false;
     bool daemon_mode = false;
-    while ((opt = getopt_long(argc, argv, "bdht:", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "b:dhto", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'b':
             if (strcmp(optarg, "waybar") == 0) {
