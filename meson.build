@@ -46,5 +46,6 @@ endif
 
 matcha_exe = executable('matcha',
   matcha_srcs,
-  dependencies: wl_inhibit_dep
+  dependencies: wl_inhibit_dep,
+  install: true
 )
