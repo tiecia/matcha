@@ -16,7 +16,8 @@
     "Usage: matcha [MODE] [OPTION]...\n"                                                           \
     "MODE:\n"                                                                                      \
     "  -d, --daemon     Main instance (Daemon Mode)\n"                                             \
-    "  -t, --toggle     Toggle instance (Toggle Mode)\n\n"                                         \
+    "  -t, --toggle     Toggle instance (Toggle Mode)\n"                                           \
+    "  -g, --get        Gets the current status of the inhibitor\n\n"                              \
     "Options:\n"                                                                                   \
     "  -b, --bar=[BAR]  Set the bar type to bar (default: None)\n"                                 \
     "  -o, --off        Start daemon with inhibitor off\n"                                         \
@@ -182,24 +183,29 @@ typedef struct {
     bool off_flag;
     bool toggle_mode;
     bool daemon_mode;
+    bool get_mode;
     Bar bar;
 } Args;
 
 Args parse_args(int argc, char** argv) {
-
     Bar bar = NONE;
     // use getopt to parse arguments
     struct option long_options[] = {
-        {"bar", required_argument, 0, 'b'}, {"daemon", no_argument, 0, 'd'},
-        {"help", no_argument, 0, 'h'},      {"toggle", no_argument, 0, 't'},
-        {"off", no_argument, 0, 'o'},       {0, 0, 0, 0},
+        {"bar", required_argument, 0, 'b'}, 
+        {"daemon", no_argument, 0, 'd'},
+        {"help", no_argument, 0, 'h'},
+        {"toggle", no_argument, 0, 't'},
+        {"off", no_argument, 0, 'o'},      
+        {"get", no_argument, 0, 'g'},
+        {0, 0, 0, 0}
     };
     int option_index = 0;
     int opt;
     bool off_flag = false;
     bool toggle_mode = false;
     bool daemon_mode = false;
-    while ((opt = getopt_long(argc, argv, "b:dhto", long_options, &option_index)) != -1) {
+    bool get_mode = false;
+    while ((opt = getopt_long(argc, argv, "b:dhtog", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'b':
             if (strcmp(optarg, "waybar") == 0) {
@@ -220,23 +226,24 @@ Args parse_args(int argc, char** argv) {
         case 't':
             toggle_mode = true;
             break;
+        case 'g':
+            get_mode = true;
+            break;
         case 'h':
         default:
-            printf(HELP);
-
             exit(EXIT_FAILURE);
         }
     }
 
-    if (toggle_mode == daemon_mode) {
-        fprintf(stderr, "ERROR: You must specify either --daemon or --toggle\n\n%s", HELP);
+    if (!(toggle_mode || daemon_mode || get_mode)) {
+        fprintf(stderr, "ERROR: You must specify either --daemon, --toggle, or --get\n\n%s", HELP);
         exit(EXIT_FAILURE);
     }
-    if (bar == YAMBAR && toggle_mode) {
+    if (bar == YAMBAR && !daemon_mode) {
         fprintf(stderr, "ERROR: Yambar only works on daemon side (--daemon)\n");
         exit(EXIT_FAILURE);
     }
-    if (bar == WAYBAR && daemon_mode) {
+    if (bar == WAYBAR && !toggle_mode) {
         fprintf(stderr, "ERROR: Waybar only works on toggle side (--toggle)\n");
         exit(EXIT_FAILURE);
     }
@@ -244,6 +251,7 @@ Args parse_args(int argc, char** argv) {
         .off_flag = off_flag,
         .daemon_mode = daemon_mode,
         .toggle_mode = toggle_mode,
+        .get_mode = get_mode,
         .bar = bar,
     };
     return ret;
@@ -302,6 +310,7 @@ int main(int argc, char** argv) {
     if (args.toggle_mode) {
         SharedMem* shm = access_shared_mem();
         shm->inhibit = !shm->inhibit;
+        printf("Inhibit status changed to: %s\n", shm->inhibit ? "enabled" : "disabled");
         if (args.bar == WAYBAR) {
             // print to waybar the result (i3 style)
             char* waybar_on = getenv("MATCHA_WAYBAR_ON");
@@ -315,6 +324,10 @@ int main(int argc, char** argv) {
         sem_post(&shm->sem);
         munmap(shm, sizeof(SharedMem));
         return EXIT_SUCCESS;
+    } else if (args.get_mode) {
+      SharedMem* shm = access_shared_mem();
+      printf("%s", shm->inhibit ? "enabled" : "disabled");
+      return EXIT_SUCCESS;
     }
 
     struct sigaction sig_action;

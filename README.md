@@ -2,6 +2,11 @@
 
 An Idle Inhibitor for Wayland
 
+A fork of: https://codeberg.org/QuincePie/matcha
+
+With the added features:
+* `-g, --get` flag to get the current state of the idle inhibitor
+
 ## Why?
 
 Some Desktop Environments and status bars may not include an idle inhibitor.
@@ -17,6 +22,7 @@ to the common approach of using dbus.
   MODE:
     -d, --daemon     Main instance (Daemon Mode)
     -t, --toggle     Toggle instance (Toggle Mode)
+    -g, --get        Get inhibit state (Get Mode)
 
   Options:
     -b, --bar=[BAR]  Set the bar type to bar (default: None)

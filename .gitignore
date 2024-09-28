@@ -4,4 +4,6 @@
 subprojects/*
 !subprojects/packagefiles
 !subprojects/*.wrap
+.ccls-cache
+result
 
